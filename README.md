@@ -61,8 +61,8 @@ newgrp docker
 
 1. Клонируйте репозиторий:
 ```bash
-git clone <repository-url>
-cd <repository-name>
+git clone https://github.com/pro-deploy/birgpt.git
+cd https://github.com/pro-deploy/birgpt.git
 ```
 
 2. Создайте файл с настройками:
