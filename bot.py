@@ -54,7 +54,7 @@ def process_document(file_path):
         )
         texts = text_splitter.split_documents(documents)
 
-        # Create embeddings using HuggingFace with trust_remote_code=True
+        # Create embeddings using HuggingFace
         embeddings = HuggingFaceEmbeddings(
             model_name="nomic-ai/nomic-embed-text-v1.5",
             model_kwargs={
@@ -83,7 +83,7 @@ async def send_typing_action(context, chat_id):
     while True:
         try:
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-            await asyncio.sleep(4)  # Telegram's typing status lasts 5 seconds
+            await asyncio.sleep(4)
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -95,24 +95,90 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Hello! I can help you with:\n"
         "1. Send any text message to get an AI response\n"
         "2. Use /img command followed by text to generate an image\n"
-        "3. Send PDF, TXT, or DOCX files to analyze them and ask questions"
+        "3. Send PDF, TXT, or DOCX files to analyze them\n"
+        "4. Use /ask command followed by question to query the uploaded documents"
     )
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        # Check if message exists
         if not update.message:
             logger.error("No message in update")
             return
 
-        # Check if user exists
-        if not update.message.from_user:
-            logger.error("No user in message")
-            return
-
         user_id = update.message.from_user.id
         chat_id = update.effective_chat.id if update.effective_chat else update.message.chat_id
+        
+        if not chat_id:
+            logger.error("No chat_id available")
+            return
 
+        # Extract question from command
+        question = update.message.text.replace('/ask', '').strip()
+        if not question:
+            await update.message.reply_text("Please provide a question after /ask command")
+            return
+
+        # Check if user has uploaded any documents
+        if user_id not in user_vector_stores:
+            await update.message.reply_text("Please upload a document first before asking questions.")
+            return
+
+        # Start typing action task
+        typing_task = asyncio.create_task(send_typing_action(context, chat_id))
+        
+        try:
+            vector_store = user_vector_stores[user_id]
+            retriever = vector_store.as_retriever()
+            
+            docs = retriever.get_relevant_documents(question)
+            context_text = "\n".join([doc.page_content for doc in docs])
+            
+            enhanced_prompt = f"Context: {context_text}\n\nQuestion: {question}"
+            
+            headers = {
+                "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            
+            data = {
+                "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+                "messages": [{"role": "user", "content": enhanced_prompt}],
+                "max_tokens": 500,
+                "stream": False
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(CHAT_API_URL, headers=headers, json=data) as response:
+                    response_json = await response.json()
+                    
+                    if response.status == 200:
+                        reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
+                        await update.message.reply_text(reply_text)
+                    else:
+                        await update.message.reply_text("Sorry, there was an error processing your request.")
+        
+        finally:
+            # Stop typing action
+            if typing_task and not typing_task.done():
+                typing_task.cancel()
+                try:
+                    await typing_task
+                except asyncio.CancelledError:
+                    pass
+
+    except Exception as e:
+        logger.error(f"Error in ask_document: {str(e)}")
+        if update and update.message:
+            await update.message.reply_text("An unexpected error occurred while processing your question.")
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        if not update.message:
+            logger.error("No message in update")
+            return
+
+        chat_id = update.effective_chat.id if update.effective_chat else update.message.chat_id
+        
         if not chat_id:
             logger.error("No chat_id available")
             return
@@ -121,63 +187,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         typing_task = asyncio.create_task(send_typing_action(context, chat_id))
         
         try:
-            if user_id in user_vector_stores:
-                try:
-                    vector_store = user_vector_stores[user_id]
-                    retriever = vector_store.as_retriever()
+            headers = {
+                "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            
+            data = {
+                "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+                "messages": [{"role": "user", "content": update.message.text}],
+                "max_tokens": 500,
+                "stream": False
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(CHAT_API_URL, headers=headers, json=data) as response:
+                    response_json = await response.json()
                     
-                    docs = retriever.get_relevant_documents(update.message.text)
-                    context_text = "\n".join([doc.page_content for doc in docs])
-                    
-                    enhanced_prompt = f"Context: {context_text}\n\nQuestion: {update.message.text}"
-                    
-                    headers = {
-                        "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
-                        "Content-Type": "application/json"
-                    }
-                    
-                    data = {
-                        "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
-                        "messages": [{"role": "user", "content": enhanced_prompt}],
-                        "max_tokens": 500,
-                        "stream": False
-                    }
-                    
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(CHAT_API_URL, headers=headers, json=data) as response:
-                            response_json = await response.json()
-                            
-                            if response.status == 200:
-                                reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
-                                await update.message.reply_text(reply_text)
-                            else:
-                                await update.message.reply_text("Sorry, there was an error processing your request.")
-                    
-                except Exception as e:
-                    logger.error(f"Error processing document query: {str(e)}")
-                    await update.message.reply_text(f"An error occurred while processing document: {str(e)}")
-            else:
-                headers = {
-                    "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
-                    "Content-Type": "application/json"
-                }
-                
-                data = {
-                    "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
-                    "messages": [{"role": "user", "content": update.message.text}],
-                    "max_tokens": 500,
-                    "stream": False
-                }
-                
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(CHAT_API_URL, headers=headers, json=data) as response:
-                        response_json = await response.json()
-                        
-                        if response.status == 200:
-                            reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
-                            await update.message.reply_text(reply_text)
-                        else:
-                            await update.message.reply_text("Sorry, there was an error processing your request.")
+                    if response.status == 200:
+                        reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
+                        await update.message.reply_text(reply_text)
+                    else:
+                        await update.message.reply_text("Sorry, there was an error processing your request.")
         
         finally:
             # Stop typing action
@@ -222,7 +252,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 os.unlink(tmp_file.name)
                 
             await update.message.reply_text(
-                "Document processed successfully! You can now ask questions about its content."
+                "Document processed successfully! You can now ask questions about its content using the /ask command."
             )
             
         except Exception as e:
@@ -281,10 +311,6 @@ async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     else:
                         await update.message.reply_text("Sorry, there was an error generating the image.")
         
-        except Exception as e:
-            logger.error(f"Error generating image: {str(e)}")
-            await update.message.reply_text(f"An error occurred: {str(e)}")
-        
         finally:
             # Stop typing action
             if typing_task and not typing_task.done():
@@ -310,6 +336,7 @@ def main():
     # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("img", generate_image))
+    application.add_handler(CommandHandler("ask", ask_document))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
