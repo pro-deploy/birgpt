@@ -16,15 +16,15 @@ ENV HUGGINGFACE_HUB_CACHE="/app/cache/huggingface"
 
 WORKDIR /app
 
-# Create cache directories
-RUN mkdir -p /app/cache/transformers /app/cache/huggingface && \
-    chmod -R 777 /app/cache
-
 COPY requirements.txt .
 
 # Install Python packages
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
+
+# Create cache directories with proper permissions
+RUN mkdir -p /app/cache/transformers /app/cache/huggingface && \
+    chmod -R 777 /app/cache
 
 COPY . .
 
