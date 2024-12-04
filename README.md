@@ -1,58 +1,68 @@
-# AI Chat & Image Generation Telegram Bot
+# AI Chat & Image Generation Telegram Bot with Document Analysis
 
-Этот бот умеет:
+Бот с возможностями:
 1. Отвечать на текстовые сообщения используя AI
-2. Генерировать изображения по текстовому описанию (команда `/img`)
+2. Генерировать изображения по описанию (команда `/img`)
+3. Анализировать документы (PDF, DOCX, TXT) и отвечать на вопросы по их содержимому
 
 ## Предварительные требования
 
-### 1. Установка Docker
-Docker - это платформа, которая позволяет запускать приложения в контейнерах.
+### 1. Установка Docker и Docker Compose
 
-#### Для Windows:
-1. Скачайте [Docker Desktop](https://www.docker.com/products/docker-desktop)
-2. Установите скачанный файл
-3. Перезагрузите компьютер
-4. Запустите Docker Desktop
+#### Windows:
+1. Скачайте и установите [Docker Desktop](https://www.docker.com/products/docker-desktop)
+2. Docker Compose уже включен в установку
 
-#### Для Linux (Ubuntu):
+#### Ubuntu:
 ```bash
+# Установка Docker
 sudo apt-get update
-sudo apt-get install docker.io docker-compose
+sudo apt-get install docker.io
+
+# Установка Docker Compose
+sudo apt-get install curl
+sudo curl -L "https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+# Запуск Docker
 sudo systemctl start docker
 sudo systemctl enable docker
+
+# Добавление вашего пользователя в группу docker
+sudo usermod -aG docker $USER
+```
+⚠️ После этого перезагрузите систему или выполните:
+```bash
+newgrp docker
 ```
 
-#### Для Mac:
-1. Скачайте [Docker Desktop](https://www.docker.com/products/docker-desktop)
-2. Установите скачанный файл
-3. Запустите Docker Desktop
+#### Mac:
+1. Скачайте и установите [Docker Desktop](https://www.docker.com/products/docker-desktop)
+2. Docker Compose уже включен в установку
 
-### 2. Получение необходимых токенов
+### 2. Получение токенов
 
 #### Telegram Bot Token:
-1. Откройте Telegram
-2. Найдите бота @BotFather
-3. Отправьте команду `/newbot`
-4. Следуйте инструкциям:
-   - Введите имя для бота
-   - Введите username для бота (должен заканчиваться на 'bot')
-5. BotFather выдаст вам токен вида `123456789:ABCdefGHIjklmNOPqrstUVwxyz`
-6. Сохраните этот токен
+1. Найдите @BotFather в Telegram
+2. Отправьте `/newbot`
+3. Следуйте инструкциям:
+   - Введите имя бота
+   - Введите username (должен заканчиваться на 'bot')
+4. Сохраните полученный токен
 
 #### Hugging Face Token:
 1. Зарегистрируйтесь на [Hugging Face](https://huggingface.co/)
 2. Перейдите в [Settings -> Access Tokens](https://huggingface.co/settings/tokens)
-3. Нажмите "New token"
-4. Дайте название токену и выберите "read" права
-5. Сохраните этот токен
+3. Создайте новый токен (New token)
+4. Выберите права "read"
+5. Сохраните полученный токен
 
-## Установка и запуск бота
+## Установка бота
 
-1. Скачайте или склонируйте этот репозиторий в папке с вашими проектами:
+1. Клонируйте репозиторий:
 ```bash
-git clone https://github.com/pro-deploy/birgpt
-cd birgpt
+git clone <repository-url>
+cd <repository-name>
 ```
 
 2. Создайте файл с настройками:
@@ -63,39 +73,38 @@ copy .env.example .env
 # Linux/Mac
 cp .env.example .env
 ```
-Не обязательно использовать командную строку, можете создать файл в обычном блокноте. Не забудьте в настройках ОС чекнуть отображение скрытых файлов.
 
-3. Откройте файл `.env` в любом текстовом редакторе и вставьте ваши токены:
+3. Отредактируйте `.env`:
 ```
 TELEGRAM_BOT_TOKEN=ваш_телеграм_токен
 HUGGINGFACE_TOKEN=ваш_huggingface_токен
 ```
-Если вы копируете из .env.example нужно только добавить токены вместо "ваш_телеграм_токен"
 
 4. Запустите бота:
 ```bash
 docker-compose up --build
 ```
-Откройте папку с проектом "birgpt" в командной строке и запустите 'docker-compose up --build'
+
 ## Использование бота
 
-1. Найдите вашего бота в Telegram по username, который вы задали при создании
-2. Нажмите Start или отправьте команду `/start`
-3. Для использования:
-   - Просто отправьте любое текстовое сообщение, чтобы получить ответ от AI
-   - Отправьте `/img` и описание изображения, чтобы сгенерировать картинку
-     Например: `/img cat playing piano`
+### Базовые функции:
+1. `/start` - начало работы
+2. Отправка текстовых сообщений → получение ответов от AI
+3. `/img описание` → генерация изображения
 
-## Остановка бота
+### Работа с документами:
+1. Отправьте файл (PDF, DOCX или TXT) в чат
+2. Дождитесь сообщения об успешной обработке
+3. Задавайте вопросы по содержимому документа
 
-Чтобы остановить бота:
-1. В терминале, где запущен бот, нажмите `Ctrl+C`
-2. Выполните команду:
-```bash
-docker-compose down
-```
+Примеры:
+- Простой чат: "Что такое машинное обучение?"
+- Генерация изображения: `/img cat playing piano`
+- Анализ документа: 
+  1. Отправьте PDF файл
+  2. Спросите "Какие основные тезисы в документе?"
 
-## Решение проблем
+## Устранение проблем
 
 ### Проблема: Docker не запускается
 - Убедитесь, что Docker Desktop запущен (для Windows/Mac)
@@ -118,15 +127,49 @@ docker-compose up --build
 docker system prune -a
 ```
 
-## Поддержка
+### Ошибка доступа к Docker
+```bash
+sudo chmod 666 /var/run/docker.sock
+```
 
-Если у вас возникли проблемы:
-1. Проверьте раздел "Решение проблем"
-2. Создайте Issue в репозитории
-3. Убедитесь, что не публикуете ваши токены публично
+### Документ не обрабатывается
+- Проверьте формат (поддерживаются PDF, DOCX, TXT)
+- Убедитесь, что файл не поврежден
+- Проверьте размер файла (не более 20MB для Telegram)
+
+
+## Ограничения
+- Векторное хранилище хранится в памяти
+- При перезапуске бота загруженные документы нужно загружать заново
+- Максимальный размер файла: 20MB (ограничение Telegram)
+
+## Для разработчиков
+
+### Локальный запуск без Docker:
+```bash
+# Создание виртуального окружения
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+venv\Scripts\activate     # Windows
+
+# Установка зависимостей
+pip install -r requirements.txt
+
+# Запуск бота
+python bot.py
+```
+
+### Требования к системе:
+- Python 3.9+
+- 2GB RAM минимум
+- Для работы с PDF требуется poppler-utils
 
 ## Безопасность
+- Не публикуйте файл `.env`
+- Регулярно обновляйте токены
+- Не загружайте конфиденциальные документы
 
-- Не публикуйте ваши токены
-- Не добавляйте файл `.env` в git
-- Регулярно меняйте токены если заметили подозрительную активность
+## Поддержка
+- Создавайте Issues в репозитории
+- Проверяйте раздел Troubleshooting
+- При сообщении об ошибках прикладывайте логи (без токенов!)
