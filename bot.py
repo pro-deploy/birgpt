@@ -1,4 +1,3 @@
-# bot.py
 import os
 import json
 import requests
@@ -61,6 +60,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     
+    # Start "typing" action
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    
     # If user has uploaded documents, use RAG
     if user_id in user_vector_stores:
         try:
@@ -87,8 +89,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "stream": False
             }
             
-            response = requests.post(CHAT_API_URL, headers=headers, json=data)
-            response_json = response.json()
+            # Keep showing "typing" while making the request
+            async with context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing"):
+                response = requests.post(CHAT_API_URL, headers=headers, json=data)
+                response_json = response.json()
             
             if response.status_code == 200:
                 reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
@@ -113,8 +117,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "stream": False
             }
             
-            response = requests.post(CHAT_API_URL, headers=headers, json=data)
-            response_json = response.json()
+            # Keep showing "typing" while making the request
+            async with context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing"):
+                response = requests.post(CHAT_API_URL, headers=headers, json=data)
+                response_json = response.json()
             
             if response.status_code == 200:
                 reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
@@ -127,6 +133,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        # Show upload action
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_document")
+        
         # Get file from user
         file = await context.bot.get_file(update.message.document.file_id)
         
@@ -135,15 +144,17 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Download file to temporary location
             await file.download_to_drive(tmp_file.name)
             
-            # Process the document
-            vector_store = process_document(tmp_file.name)
-            
-            # Store the vector store for this user
-            user_id = update.message.from_user.id
-            user_vector_stores[user_id] = vector_store
-            
-            # Delete temporary file
-            os.unlink(tmp_file.name)
+            # Show typing action while processing
+            async with context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing"):
+                # Process the document
+                vector_store = process_document(tmp_file.name)
+                
+                # Store the vector store for this user
+                user_id = update.message.from_user.id
+                user_vector_stores[user_id] = vector_store
+                
+                # Delete temporary file
+                os.unlink(tmp_file.name)
             
         await update.message.reply_text(
             "Document processed successfully! You can now ask questions about its content."
@@ -153,7 +164,34 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error processing document: {str(e)}")
 
 async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (оставляем без изменений)
+    try:
+        # Extract the prompt from the command
+        prompt = update.message.text.replace('/img', '').strip()
+        if not prompt:
+            await update.message.reply_text("Please provide a description after /img command")
+            return
+
+        headers = {
+            "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "inputs": prompt
+        }
+        
+        # Show upload_photo action while generating
+        async with context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo"):
+            response = requests.post(IMAGE_API_URL, headers=headers, json=data)
+        
+        if response.status_code == 200:
+            # Send the image directly to telegram
+            await update.message.reply_photo(response.content)
+        else:
+            await update.message.reply_text("Sorry, there was an error generating the image.")
+            
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {str(e)}")
 
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -161,7 +199,7 @@ def main():
     # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("img", generate_image))
-    application.add_handler(MessageHandler(filters.DOCUMENT, handle_document))
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     # Start the bot
