@@ -11,6 +11,8 @@ from langchain.chains import ConversationalRetrievalChain
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import asyncio
+import aiohttp
 
 # Load environment variables
 load_dotenv()
@@ -57,54 +59,57 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "3. Send PDF, TXT, or DOCX files to analyze them and ask questions"
     )
 
+async def send_typing_action(context, chat_id):
+    while True:
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+            await asyncio.sleep(4)  # Telegram's typing status lasts 5 seconds
+        except asyncio.CancelledError:
+            break
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
+    chat_id = update.effective_chat.id
+
+    # Start typing action task
+    typing_task = asyncio.create_task(send_typing_action(context, chat_id))
     
-    # Start "typing" action
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    
-    # If user has uploaded documents, use RAG
-    if user_id in user_vector_stores:
-        try:
-            vector_store = user_vector_stores[user_id]
-            retriever = vector_store.as_retriever()
-            
-            # Get relevant documents
-            docs = retriever.get_relevant_documents(update.message.text)
-            context_text = "\n".join([doc.page_content for doc in docs])
-            
-            # Combine user question with context
-            enhanced_prompt = f"Context: {context_text}\n\nQuestion: {update.message.text}"
-            
-            # Use the enhanced prompt with the API
-            headers = {
-                "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
-                "Content-Type": "application/json"
-            }
-            
-            data = {
-                "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
-                "messages": [{"role": "user", "content": enhanced_prompt}],
-                "max_tokens": 500,
-                "stream": False
-            }
-            
-            # Keep showing "typing" while making the request
-            async with context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing"):
-                response = requests.post(CHAT_API_URL, headers=headers, json=data)
-                response_json = response.json()
-            
-            if response.status_code == 200:
-                reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
-                await update.message.reply_text(reply_text)
-            else:
-                await update.message.reply_text("Sorry, there was an error processing your request.")
+    try:
+        if user_id in user_vector_stores:
+            try:
+                vector_store = user_vector_stores[user_id]
+                retriever = vector_store.as_retriever()
                 
-        except Exception as e:
-            await update.message.reply_text(f"An error occurred: {str(e)}")
-    else:
-        # Regular chat without RAG
-        try:
+                docs = retriever.get_relevant_documents(update.message.text)
+                context_text = "\n".join([doc.page_content for doc in docs])
+                
+                enhanced_prompt = f"Context: {context_text}\n\nQuestion: {update.message.text}"
+                
+                headers = {
+                    "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
+                    "Content-Type": "application/json"
+                }
+                
+                data = {
+                    "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+                    "messages": [{"role": "user", "content": enhanced_prompt}],
+                    "max_tokens": 500,
+                    "stream": False
+                }
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(CHAT_API_URL, headers=headers, json=data) as response:
+                        response_json = await response.json()
+                        
+                        if response.status == 200:
+                            reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
+                            await update.message.reply_text(reply_text)
+                        else:
+                            await update.message.reply_text("Sorry, there was an error processing your request.")
+                
+            except Exception as e:
+                await update.message.reply_text(f"An error occurred: {str(e)}")
+        else:
             headers = {
                 "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
                 "Content-Type": "application/json"
@@ -117,44 +122,42 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "stream": False
             }
             
-            # Keep showing "typing" while making the request
-            async with context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing"):
-                response = requests.post(CHAT_API_URL, headers=headers, json=data)
-                response_json = response.json()
-            
-            if response.status_code == 200:
-                reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
-                await update.message.reply_text(reply_text)
-            else:
-                await update.message.reply_text("Sorry, there was an error processing your request.")
-                
-        except Exception as e:
-            await update.message.reply_text(f"An error occurred: {str(e)}")
+            async with aiohttp.ClientSession() as session:
+                async with session.post(CHAT_API_URL, headers=headers, json=data) as response:
+                    response_json = await response.json()
+                    
+                    if response.status == 200:
+                        reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
+                        await update.message.reply_text(reply_text)
+                    else:
+                        await update.message.reply_text("Sorry, there was an error processing your request.")
+    
+    finally:
+        # Stop typing action
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    
+    # Start typing action task
+    typing_task = asyncio.create_task(send_typing_action(context, chat_id))
+    
     try:
-        # Show upload action
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_document")
-        
-        # Get file from user
         file = await context.bot.get_file(update.message.document.file_id)
         
-        # Create temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(update.message.document.file_name)[1]) as tmp_file:
-            # Download file to temporary location
             await file.download_to_drive(tmp_file.name)
             
-            # Show typing action while processing
-            async with context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing"):
-                # Process the document
-                vector_store = process_document(tmp_file.name)
-                
-                # Store the vector store for this user
-                user_id = update.message.from_user.id
-                user_vector_stores[user_id] = vector_store
-                
-                # Delete temporary file
-                os.unlink(tmp_file.name)
+            vector_store = process_document(tmp_file.name)
+            
+            user_id = update.message.from_user.id
+            user_vector_stores[user_id] = vector_store
+            
+            os.unlink(tmp_file.name)
             
         await update.message.reply_text(
             "Document processed successfully! You can now ask questions about its content."
@@ -162,10 +165,22 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         await update.message.reply_text(f"Error processing document: {str(e)}")
+    
+    finally:
+        # Stop typing action
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
 
 async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    
+    # Start typing action task
+    typing_task = asyncio.create_task(send_typing_action(context, chat_id))
+    
     try:
-        # Extract the prompt from the command
         prompt = update.message.text.replace('/img', '').strip()
         if not prompt:
             await update.message.reply_text("Please provide a description after /img command")
@@ -180,18 +195,24 @@ async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "inputs": prompt
         }
         
-        # Show upload_photo action while generating
-        async with context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo"):
-            response = requests.post(IMAGE_API_URL, headers=headers, json=data)
-        
-        if response.status_code == 200:
-            # Send the image directly to telegram
-            await update.message.reply_photo(response.content)
-        else:
-            await update.message.reply_text("Sorry, there was an error generating the image.")
-            
+        async with aiohttp.ClientSession() as session:
+            async with session.post(IMAGE_API_URL, headers=headers, json=data) as response:
+                if response.status == 200:
+                    image_data = await response.read()
+                    await update.message.reply_photo(image_data)
+                else:
+                    await update.message.reply_text("Sorry, there was an error generating the image.")
+    
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {str(e)}")
+    
+    finally:
+        # Stop typing action
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
 
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
