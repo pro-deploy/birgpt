@@ -1,6 +1,15 @@
 version: '3'
+
 services:
   bot:
     build: .
     env_file:
       - .env
+    volumes:
+      - ./cache:/app/cache
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
