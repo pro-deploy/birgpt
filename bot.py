@@ -15,14 +15,14 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import asyncio
 import aiohttp
 
-# Set up logging
+# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables
+# Загрузка переменных окружения
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 HUGGINGFACE_TOKEN = os.getenv('HUGGINGFACE_TOKEN')
@@ -31,12 +31,12 @@ HUGGINGFACE_TOKEN = os.getenv('HUGGINGFACE_TOKEN')
 CHAT_API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-Coder-32B-Instruct/v1/chat/completions"
 IMAGE_API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev"
 
-# Initialize vector store dictionary
+# Инициализация словаря векторных хранилищ
 user_vector_stores = {}
 
 def process_document(file_path):
     try:
-        # Determine the loader based on file extension
+        # Определение загрузчика на основе расширения файла
         if file_path.endswith('.pdf'):
             loader = PyPDFLoader(file_path)
         elif file_path.endswith('.txt'):
@@ -44,9 +44,8 @@ def process_document(file_path):
         elif file_path.endswith('.docx'):
             loader = Docx2txtLoader(file_path)
         else:
-            raise ValueError("Unsupported file format")
+            raise ValueError("Неподдерживаемый формат файла")
 
-        # Load and split the document
         documents = loader.load()
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=500,
@@ -54,7 +53,6 @@ def process_document(file_path):
         )
         texts = text_splitter.split_documents(documents)
 
-        # Create embeddings using HuggingFace
         embeddings = HuggingFaceEmbeddings(
             model_name="nomic-ai/nomic-embed-text-v1.5",
             model_kwargs={
@@ -66,7 +64,6 @@ def process_document(file_path):
             }
         )
         
-        # Create the vector store
         vector_store = FAISS.from_documents(
             texts, 
             embeddings,
@@ -76,7 +73,7 @@ def process_document(file_path):
         return vector_store
 
     except Exception as e:
-        logger.error(f"Error in process_document: {str(e)}")
+        logger.error(f"Ошибка в process_document: {str(e)}")
         raise
 
 async def send_typing_action(context, chat_id):
@@ -87,43 +84,40 @@ async def send_typing_action(context, chat_id):
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.error(f"Error in typing action: {str(e)}")
+            logger.error(f"Ошибка в typing action: {str(e)}")
             break
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Hello! I can help you with:\n"
-        "1. Send any text message to get an AI response\n"
-        "2. Use /img command followed by text to generate an image\n"
-        "3. Send PDF, TXT, or DOCX files to analyze them\n"
-        "4. Use /ask command followed by question to query the uploaded documents"
+        "Привет! Я могу помочь с:\n"
+        "1. Отправь любое сообщение текстом, чтобы получить ответ от ИИ\n"
+        "2. Используй команду /img и описание, чтобы сгенерировать изображение\n"
+        "3. Отправь файлы в форматах PDF, TXT или DOCX для их анализа\n"
+        "4. Используй команду /ask и вопрос, чтобы задать вопрос по загруженным документам"
     )
 
 async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if not update.message:
-            logger.error("No message in update")
+            logger.error("Нет сообщения в обновлении")
             return
 
         user_id = update.message.from_user.id
         chat_id = update.effective_chat.id if update.effective_chat else update.message.chat_id
         
         if not chat_id:
-            logger.error("No chat_id available")
+            logger.error("Нет доступного chat_id")
             return
 
-        # Extract question from command
         question = update.message.text.replace('/ask', '').strip()
         if not question:
-            await update.message.reply_text("Please provide a question after /ask command")
+            await update.message.reply_text("Пожалуйста, добавьте вопрос после команды /ask")
             return
 
-        # Check if user has uploaded any documents
         if user_id not in user_vector_stores:
-            await update.message.reply_text("Please upload a document first before asking questions.")
+            await update.message.reply_text("Пожалуйста, сначала загрузите документ, прежде чем задавать вопросы.")
             return
 
-        # Start typing action task
         typing_task = asyncio.create_task(send_typing_action(context, chat_id))
         
         try:
@@ -152,13 +146,12 @@ async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     response_json = await response.json()
                     
                     if response.status == 200:
-                        reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
+                        reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'Нет ответа')
                         await update.message.reply_text(reply_text)
                     else:
-                        await update.message.reply_text("Sorry, there was an error processing your request.")
+                        await update.message.reply_text("Извините, произошла ошибка при обработке вашего запроса.")
         
         finally:
-            # Stop typing action
             if typing_task and not typing_task.done():
                 typing_task.cancel()
                 try:
@@ -167,23 +160,22 @@ async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
 
     except Exception as e:
-        logger.error(f"Error in ask_document: {str(e)}")
+        logger.error(f"Ошибка в ask_document: {str(e)}")
         if update and update.message:
-            await update.message.reply_text("An unexpected error occurred while processing your question.")
+            await update.message.reply_text("Произошла непредвиденная ошибка при обработке вашего вопроса.")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if not update.message:
-            logger.error("No message in update")
+            logger.error("Нет сообщения в обновлении")
             return
 
         chat_id = update.effective_chat.id if update.effective_chat else update.message.chat_id
         
         if not chat_id:
-            logger.error("No chat_id available")
+            logger.error("Нет доступного chat_id")
             return
 
-        # Start typing action task
         typing_task = asyncio.create_task(send_typing_action(context, chat_id))
         
         try:
@@ -204,13 +196,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     response_json = await response.json()
                     
                     if response.status == 200:
-                        reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'No response')
+                        reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'Нет ответа')
                         await update.message.reply_text(reply_text)
                     else:
-                        await update.message.reply_text("Sorry, there was an error processing your request.")
+                        await update.message.reply_text("Извините, произошла ошибка при обработке вашего запроса.")
         
         finally:
-            # Stop typing action
             if typing_task and not typing_task.done():
                 typing_task.cancel()
                 try:
@@ -219,24 +210,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
 
     except Exception as e:
-        logger.error(f"Critical error in handle_text: {str(e)}")
+        logger.error(f"Критическая ошибка в handle_text: {str(e)}")
         if update and update.message:
-            await update.message.reply_text("An unexpected error occurred. Please try again later.")
+            await update.message.reply_text("Произошла непредвиденная ошибка. Пожалуйста, попробуйте позже.")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    typing_task = None
     try:
         if not update.message:
-            logger.error("No message in update")
+            logger.error("Нет сообщения в обновлении")
             return
 
         chat_id = update.effective_chat.id if update.effective_chat else update.message.chat_id
         
         if not chat_id:
-            logger.error("No chat_id available")
+            logger.error("Нет доступного chat_id")
             return
 
-        # Start typing action task
+        # Начинаем показывать "печатает" сразу при получении документа
         typing_task = asyncio.create_task(send_typing_action(context, chat_id))
+        
+        await update.message.reply_text("Начинаю обработку документа...")
         
         try:
             file = await context.bot.get_file(update.message.document.file_id)
@@ -252,46 +246,43 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 os.unlink(tmp_file.name)
                 
             await update.message.reply_text(
-                "Document processed successfully! You can now ask questions about its content using the /ask command."
+                "Документ успешно обработан! Теперь вы можете задавать вопросы по его содержимому с помощью команды /ask"
             )
             
         except Exception as e:
-            logger.error(f"Error processing document: {str(e)}")
-            await update.message.reply_text(f"Error processing document: {str(e)}")
+            logger.error(f"Ошибка обработки документа: {str(e)}")
+            await update.message.reply_text(f"Ошибка обработки документа: {str(e)}")
         
-        finally:
-            # Stop typing action
-            if typing_task and not typing_task.done():
-                typing_task.cancel()
-                try:
-                    await typing_task
-                except asyncio.CancelledError:
-                    pass
-
     except Exception as e:
-        logger.error(f"Critical error in handle_document: {str(e)}")
+        logger.error(f"Критическая ошибка в handle_document: {str(e)}")
         if update and update.message:
-            await update.message.reply_text("An unexpected error occurred while processing the document.")
+            await update.message.reply_text("Произошла непредвиденная ошибка при обработке документа.")
+    finally:
+        if typing_task and not typing_task.done():
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
 
 async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if not update.message:
-            logger.error("No message in update")
+            logger.error("Нет сообщения в обновлении")
             return
 
         chat_id = update.effective_chat.id if update.effective_chat else update.message.chat_id
         
         if not chat_id:
-            logger.error("No chat_id available")
+            logger.error("Нет доступного chat_id")
             return
 
-        # Start typing action task
         typing_task = asyncio.create_task(send_typing_action(context, chat_id))
         
         try:
             prompt = update.message.text.replace('/img', '').strip()
             if not prompt:
-                await update.message.reply_text("Please provide a description after /img command")
+                await update.message.reply_text("Пожалуйста, добавьте описание после команды /img")
                 return
 
             headers = {
@@ -309,10 +300,9 @@ async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         image_data = await response.read()
                         await update.message.reply_photo(image_data)
                     else:
-                        await update.message.reply_text("Sorry, there was an error generating the image.")
+                        await update.message.reply_text("Извините, произошла ошибка при генерации изображения.")
         
         finally:
-            # Stop typing action
             if typing_task and not typing_task.done():
                 typing_task.cancel()
                 try:
@@ -321,30 +311,30 @@ async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
 
     except Exception as e:
-        logger.error(f"Critical error in generate_image: {str(e)}")
+        logger.error(f"Критическая ошибка в generate_image: {str(e)}")
         if update and update.message:
-            await update.message.reply_text("An unexpected error occurred while generating the image.")
+            await update.message.reply_text("Произошла непредвиденная ошибка при генерации изображения.")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error(f'Error occurred: {context.error}')
+    logger.error(f'Произошла ошибка: {context.error}')
     if update and update.effective_message:
-        await update.effective_message.reply_text('An error occurred. Please try again later.')
+        await update.effective_message.reply_text('Произошла ошибка. Пожалуйста, попробуйте позже.')
 
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # Add handlers
+    # Добавление обработчиков
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("img", generate_image))
     application.add_handler(CommandHandler("ask", ask_document))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # Add error handler
+    # Добавление обработчика ошибок
     application.add_error_handler(error_handler)
 
-    # Start the bot
-    logger.info("Starting bot...")
+    # Запуск бота
+    logger.info("Запуск бота...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

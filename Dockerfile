@@ -29,5 +29,5 @@ RUN mkdir -p /app/cache/transformers /app/cache/huggingface && \
 COPY . .
 
 # Add the EXPOSE instruction with your application's port
-EXPOSE 80
+EXPOSE 5000
 CMD ["python", "bot.py"]
