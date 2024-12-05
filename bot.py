@@ -187,7 +187,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             data = {
                 "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
                 "messages": [{"role": "user", "content": update.message.text}],
-                "max_tokens": 500,
+                "max_tokens": 2096,
                 "stream": False
             }
             
