@@ -94,7 +94,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "2. Используй команду /img и описание, чтобы сгенерировать изображение\n"
         "3. Отправь файлы в форматах PDF, TXT или DOCX для их анализа\n"
         "4. Используй команду /ask и вопрос, чтобы задать вопрос по загруженным документам"
-        parse_mode='Markdown'
     )
 
 async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
