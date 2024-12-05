@@ -38,10 +38,10 @@ class Config:
     CHAT_API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-Coder-32B-Instruct/v1/chat/completions"
     IMAGE_API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev"
 
-    MAX_HISTORY = 10
+    MAX_HISTORY = 20
     CHUNK_SIZE = 500
     CHUNK_OVERLAP = 50
-    MAX_TOKENS = 500
+    MAX_TOKENS = 2096
     DB_PATH = "chats.db"
 
     EMBEDDINGS_CONFIG = {
