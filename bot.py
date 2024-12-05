@@ -94,6 +94,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "2. Используй команду /img и описание, чтобы сгенерировать изображение\n"
         "3. Отправь файлы в форматах PDF, TXT или DOCX для их анализа\n"
         "4. Используй команду /ask и вопрос, чтобы задать вопрос по загруженным документам"
+        parse_mode='Markdown'
     )
 
 async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -147,7 +148,7 @@ async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     
                     if response.status == 200:
                         reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'Нет ответа')
-                        await update.message.reply_text(reply_text)
+                        await update.message.reply_text(reply_text, parse_mode='Markdown')
                     else:
                         await update.message.reply_text("Извините, произошла ошибка при обработке вашего запроса.")
         
@@ -197,7 +198,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     
                     if response.status == 200:
                         reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'Нет ответа')
-                        await update.message.reply_text(reply_text)
+                        await update.message.reply_text(reply_text, parse_mode='Markdown')
                     else:
                         await update.message.reply_text("Извините, произошла ошибка при обработке вашего запроса.")
         
