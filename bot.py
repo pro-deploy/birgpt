@@ -40,13 +40,27 @@ def process_document(file_path):
         if file_path.endswith('.pdf'):
             loader = PyPDFLoader(file_path)
         elif file_path.endswith('.txt'):
-            loader = TextLoader(file_path)
+            # Добавляем explicit encoding для текстовых файлов
+            loader = TextLoader(file_path, encoding='utf-8')
         elif file_path.endswith('.docx'):
             loader = Docx2txtLoader(file_path)
         else:
             raise ValueError("Неподдерживаемый формат файла")
 
+        # Добавим проверку существования файла
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Файл не найден: {file_path}")
+
+        # Добавим проверку размера файла
+        if os.path.getsize(file_path) == 0:
+            raise ValueError("Файл пуст")
+
         documents = loader.load()
+        
+        # Проверка, что документы успешно загружены
+        if not documents:
+            raise ValueError("Не удалось извлечь содержимое из файла")
+
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=500,
             chunk_overlap=50
@@ -72,6 +86,12 @@ def process_document(file_path):
         
         return vector_store
 
+    except FileNotFoundError as e:
+        logger.error(f"Файл не найден: {str(e)}")
+        raise
+    except ValueError as e:
+        logger.error(f"Ошибка в формате файла: {str(e)}")
+        raise
     except Exception as e:
         logger.error(f"Ошибка в process_document: {str(e)}")
         raise
@@ -216,6 +236,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     typing_task = None
+    temp_file = None
     try:
         if not update.message:
             logger.error("Нет сообщения в обновлении")
@@ -227,37 +248,46 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error("Нет доступного chat_id")
             return
 
-        # Начинаем показывать "печатает" сразу при получении документа
         typing_task = asyncio.create_task(send_typing_action(context, chat_id))
         
         await update.message.reply_text("Начинаю обработку документа...")
         
-        try:
-            file = await context.bot.get_file(update.message.document.file_id)
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(update.message.document.file_name)[1]) as tmp_file:
-                await file.download_to_drive(tmp_file.name)
-                
-                vector_store = process_document(tmp_file.name)
-                
-                user_id = update.message.from_user.id
-                user_vector_stores[user_id] = vector_store
-                
-                os.unlink(tmp_file.name)
-                
-            await update.message.reply_text(
-                "Документ успешно обработан! Теперь вы можете задавать вопросы по его содержимому с помощью команды /ask"
-            )
-            
-        except Exception as e:
-            logger.error(f"Ошибка обработки документа: {str(e)}")
-            await update.message.reply_text(f"Ошибка обработки документа: {str(e)}")
+        file = await context.bot.get_file(update.message.document.file_id)
+        file_extension = os.path.splitext(update.message.document.file_name)[1].lower()
         
+        if file_extension not in ['.pdf', '.txt', '.docx']:
+            await update.message.reply_text("Неподдерживаемый формат файла. Пожалуйста, отправьте файл в формате PDF, TXT или DOCX.")
+            return
+            
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file_extension)
+        await file.download_to_drive(temp_file.name)
+        
+        # Проверка размера файла
+        if os.path.getsize(temp_file.name) == 0:
+            await update.message.reply_text("Файл пуст. Пожалуйста, отправьте файл с содержимым.")
+            return
+
+        vector_store = process_document(temp_file.name)
+        
+        user_id = update.message.from_user.id
+        user_vector_stores[user_id] = vector_store
+                
+        await update.message.reply_text(
+            "Документ успешно обработан! Теперь вы можете задавать вопросы по его содержимому с помощью команды /ask"
+        )
+            
     except Exception as e:
-        logger.error(f"Критическая ошибка в handle_document: {str(e)}")
-        if update and update.message:
-            await update.message.reply_text("Произошла непредвиденная ошибка при обработке документа.")
+        logger.error(f"Ошибка обработки документа: {str(e)}")
+        await update.message.reply_text(f"Ошибка обработки документа: {str(e)}")
+    
     finally:
+        # Очистка временных файлов
+        if temp_file and os.path.exists(temp_file.name):
+            try:
+                os.unlink(temp_file.name)
+            except Exception as e:
+                logger.error(f"Ошибка при удалении временного файла: {str(e)}")
+        
         if typing_task and not typing_task.done():
             typing_task.cancel()
             try:
