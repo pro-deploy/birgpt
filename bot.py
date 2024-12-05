@@ -31,12 +31,13 @@ HUGGINGFACE_TOKEN = os.getenv('HUGGINGFACE_TOKEN')
 CHAT_API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-Coder-32B-Instruct/v1/chat/completions"
 IMAGE_API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev"
 
-# Инициализация словаря векторных хранилищ
+# Инициализация словарей для хранения данных пользователей
 user_vector_stores = {}
+user_conversations = {}  # Словарь для хранения истории разговоров
+MAX_HISTORY = 10  # Максимальное количество сохраняемых сообщений
 
 def process_document(file_path):
     try:
-        # Определение загрузчика на основе расширения файла
         if file_path.endswith('.pdf'):
             loader = PyPDFLoader(file_path)
         elif file_path.endswith('.txt'):
@@ -93,8 +94,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1. Отправь любое сообщение текстом, чтобы получить ответ от ИИ\n"
         "2. Используй команду /img и описание, чтобы сгенерировать изображение\n"
         "3. Отправь файлы в форматах PDF, TXT или DOCX для их анализа\n"
-        "4. Используй команду /ask и вопрос, чтобы задать вопрос по загруженным документам"
+        "4. Используй команду /ask и вопрос, чтобы задать вопрос по загруженным документам\n"
+        "5. Используй команду /clear для очистки истории разговора"
     )
+
+async def clear_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        user_id = update.message.from_user.id
+        if user_id in user_conversations:
+            user_conversations[user_id] = []
+            await update.message.reply_text("История разговора очищена!")
+        else:
+            await update.message.reply_text("История разговора уже пуста.")
+    except Exception as e:
+        logger.error(f"Ошибка при очистке контекста: {str(e)}")
+        await update.message.reply_text("Произошла ошибка при очистке истории разговора.")
 
 async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -127,7 +141,12 @@ async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             docs = retriever.get_relevant_documents(question)
             context_text = "\n".join([doc.page_content for doc in docs])
             
-            enhanced_prompt = f"Context: {context_text}\n\nQuestion: {question}"
+            # Получаем историю разговора
+            conversation_history = user_conversations.get(user_id, [])
+            
+            messages = [{"role": "system", "content": "Ты полезный ассистент"}]
+            messages.extend(conversation_history)
+            messages.append({"role": "user", "content": f"Context: {context_text}\n\nQuestion: {question}"})
             
             headers = {
                 "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
@@ -136,7 +155,7 @@ async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             data = {
                 "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
-                "messages": [{"role": "user", "content": enhanced_prompt}],
+                "messages": messages,
                 "max_tokens": 500,
                 "stream": False
             }
@@ -148,9 +167,19 @@ async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if response.status == 200:
                         reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'Нет ответа')
                         await update.message.reply_text(reply_text)
+                        
+                        # Сохраняем вопрос и ответ в истории
+                        if user_id not in user_conversations:
+                            user_conversations[user_id] = []
+                            
+                        user_conversations[user_id].append({"role": "user", "content": question})
+                        user_conversations[user_id].append({"role": "assistant", "content": reply_text})
+                        
+                        # Ограничиваем историю
+                        if len(user_conversations[user_id]) > MAX_HISTORY * 2:
+                            user_conversations[user_id] = user_conversations[user_id][-MAX_HISTORY * 2:]
                     else:
                         await update.message.reply_text("Извините, произошла ошибка при обработке вашего запроса.")
-        
         finally:
             if typing_task and not typing_task.done():
                 typing_task.cancel()
@@ -171,6 +200,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         chat_id = update.effective_chat.id if update.effective_chat else update.message.chat_id
+        user_id = update.message.from_user.id
         
         if not chat_id:
             logger.error("Нет доступного chat_id")
@@ -179,6 +209,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         typing_task = asyncio.create_task(send_typing_action(context, chat_id))
         
         try:
+            # Получаем историю разговора для пользователя
+            if user_id not in user_conversations:
+                user_conversations[user_id] = []
+
+            # Формируем контекст из истории
+            conversation_history = user_conversations[user_id]
+            messages = [{"role": "system", "content": "Ты полезный ассистент"}]
+            messages.extend(conversation_history)
+            messages.append({"role": "user", "content": update.message.text})
+            
             headers = {
                 "Authorization": f"Bearer {HUGGINGFACE_TOKEN}",
                 "Content-Type": "application/json"
@@ -186,7 +226,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             data = {
                 "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
-                "messages": [{"role": "user", "content": update.message.text}],
+                "messages": messages,
                 "max_tokens": 500,
                 "stream": False
             }
@@ -198,6 +238,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if response.status == 200:
                         reply_text = response_json.get('choices', [{}])[0].get('message', {}).get('content', 'Нет ответа')
                         await update.message.reply_text(reply_text)
+                        
+                        # Сохраняем сообщение пользователя и ответ в истории
+                        user_conversations[user_id].append({"role": "user", "content": update.message.text})
+                        user_conversations[user_id].append({"role": "assistant", "content": reply_text})
+                        
+                        # Ограничиваем историю последними N сообщениями
+                        if len(user_conversations[user_id]) > MAX_HISTORY * 2:
+                            user_conversations[user_id] = user_conversations[user_id][-MAX_HISTORY * 2:]
                     else:
                         await update.message.reply_text("Извините, произошла ошибка при обработке вашего запроса.")
         
@@ -227,7 +275,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error("Нет доступного chat_id")
             return
 
-        # Начинаем показывать "печатает" сразу при получении документа
         typing_task = asyncio.create_task(send_typing_action(context, chat_id))
         
         await update.message.reply_text("Начинаю обработку документа...")
@@ -327,6 +374,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("img", generate_image))
     application.add_handler(CommandHandler("ask", ask_document))
+    application.add_handler(CommandHandler("clear", clear_context))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
