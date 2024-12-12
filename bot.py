@@ -49,15 +49,19 @@ async def process_request(func, update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     chat_id = update.effective_chat.id if update.effective_chat else update.message.chat_id
+    
+    # Создаём задачу для индикатора набора текста
     typing_task = asyncio.create_task(send_typing_action(context, chat_id))
-
+    
     try:
+        # Выполняем основную функцию
         await func(update, context)
     except Exception as e:
         logger.error(f"Ошибка в process_request: {str(e)}")
         if update and update.message:
             await update.message.reply_text("Произошла ошибка при обработке запроса.")
     finally:
+        # Отменяем индикатор набора текста только после завершения функции
         typing_task.cancel()
         try:
             await typing_task
@@ -158,9 +162,6 @@ async def ask_document_internal(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error(f"Ошибка в ask_document: {str(e)}")
         await update.message.reply_text("Произошла ошибка при обработке вопроса.")
 
-async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await process_request(ask_document_internal, update, context)
-
 async def handle_text_internal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         headers = {
@@ -187,9 +188,6 @@ async def handle_text_internal(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.error(f"Ошибка в handle_text_internal: {str(e)}")
         await update.message.reply_text("Произошла ошибка при обработке запроса.")
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await process_request(handle_text_internal, update, context)
 
 async def handle_document_internal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_file = None
@@ -229,9 +227,6 @@ async def handle_document_internal(update: Update, context: ContextTypes.DEFAULT
             except Exception as e:
                 logger.error(f"Ошибка при удалении временного файла: {str(e)}")
 
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await process_request(handle_document_internal, update, context)
-
 async def generate_image_internal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         prompt = update.message.text.replace('/img', '').strip()
@@ -260,8 +255,22 @@ async def generate_image_internal(update: Update, context: ContextTypes.DEFAULT_
         logger.error(f"Ошибка в generate_image_internal: {str(e)}")
         await update.message.reply_text("Произошла ошибка при генерации изображения.")
 
+# Обработчики команд и сообщений
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    asyncio.create_task(process_request(handle_text_internal, update, context))
+    return
+
 async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await process_request(generate_image_internal, update, context)
+    asyncio.create_task(process_request(generate_image_internal, update, context))
+    return
+
+async def ask_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    asyncio.create_task(process_request(ask_document_internal, update, context))
+    return
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    asyncio.create_task(process_request(handle_document_internal, update, context))
+    return
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(f'Произошла ошибка: {context.error}')
