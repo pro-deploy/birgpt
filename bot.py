@@ -115,7 +115,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1. Отправь любое сообщение текстом, чтобы получить ответ от ИИ\n"
         "2. Используй команду /img и описание, чтобы сгенерировать изображение\n"
         "3. Отправь файлы в форматах PDF, TXT или DOCX для их анализа\n"
-        "4. Используй команду /ask и вопрос, чтобы задать вопрос по загруженным документам"
+        "4. Используй команду /ask и вопрос, чтобы задать вопрос по загруженным документам\n"
+        "5. Используй команду /code, чтобы получить ссылку для генерации кода проекта."
+    )
+
+async def code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Для генерации кода проекта целиком и получение его в архиве перейдите по ссылке - http://code.idaai.org/"
     )
 
 async def ask_document_internal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -276,11 +282,6 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error(f'Произошла ошибка: {context.error}')
     if update and update.effective_message:
         await update.effective_message.reply_text('Произошла ошибка. Пожалуйста, попробуйте позже.')
-        
-async def code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Для генерации кода проекта целиком и получение его в архиве перейдите по ссылке - http://code.idaai.org/"
-    )
 
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -289,7 +290,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("img", generate_image))
     application.add_handler(CommandHandler("ask", ask_document))
-    application.add_handler(CommandHandler("code", code))
+    application.add_handler(CommandHandler("code", code))  # Добавление нового обработчика команды /code
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
