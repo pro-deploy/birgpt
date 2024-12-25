@@ -276,6 +276,11 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error(f'Произошла ошибка: {context.error}')
     if update and update.effective_message:
         await update.effective_message.reply_text('Произошла ошибка. Пожалуйста, попробуйте позже.')
+        
+async def code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Для генерации кода проекта целиком и получение его в архиве перейдите по ссылке - http://code.idaai.org/"
+    )
 
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -284,6 +289,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("img", generate_image))
     application.add_handler(CommandHandler("ask", ask_document))
+    application.add_handler(CommandHandler("code", code))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
